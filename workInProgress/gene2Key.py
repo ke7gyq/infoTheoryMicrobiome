@@ -59,16 +59,17 @@ class g2k:
 
     # Self.dataframe must be set.
     # Note that this will be spawned as a multiprocessor command.
-    def importData ( self , start, end ):
+    def importData ( self , start, end , processNumber, return_dict ):
         if not self.initialized:
             raise ValueError ("Initialize failure, Data frame not set ")
         hdrData , geneData = ([],[] )
         for  rowNumber in range ( start, end ):
-            print "Translating row %d " % rowNumber  
+            print "Processor %d Translating row %d " % (processNumber, rowNumber)  
             hdr, gene = self.makeCompactGeneArray( self.dataFrame.ix[rowNumber] )
             hdrData.append( hdr)
             geneData.append(gene)
-            self.data = { 'header': hdrData, 'geneData': geneData }
+        return_dict [ processNumber] = (hdrData, geneData)
+        # self.data = { 'header': hdrData, 'geneData': geneData }
             
 
 
@@ -77,21 +78,33 @@ class g2k:
         return_dict[processNumber] = (start,end)
 
 
-        
-    def startImport ( self, nProcess = 10  ) :
-        # n = self.dataFrame.shape[0]
-        n = 50
-        stride , start, end , processNumber  0= (n // (nProcess-1), 0 , 0, -1 )
+    # Start multithreading on gene data.
+    # 
+    def startImport ( self, nProcess = 10 , n=None ) :
+        if not n :
+            n = self.dataFrame.shape[0]
+
+        stride , start, end , pn , jobs  = (n // (nProcess-1), 0 , 0, -1 , [])
+        manager = multiprocessing.Manager()
+        rd = manager.dict()
         while start < n  :
             pn += 1 
             end = start + stride if start+stride < n else n-1
-            p = multiprocessing.Process(target= g2k.testProcess, args = ( self, start , end, pn, rd ) )
+            # p = multiprocessing.Process(target= g2k.testProcess, args = ( self, start , end, pn, rd ) )
+            p = multiprocessing.Process(target= g2k.importData, args = ( self, start , end, pn, rd ) )
             start = start+stride
+            jobs.append(p)
             p.start()
-            p.join ()
-        
-      
 
+        for p in jobs:
+            p.join()
+
+        hdr, gene = ( [], [] )
+        for k in rd.keys():
+            hdr.extend(rd[k][0])
+            gene.extend(rd[k][1])
+                        
+        return ( hdr, gene )
 
     
 
@@ -99,14 +112,15 @@ class g2k:
 
 if False:
     # %pdb
-
-     # To Reload:
+    # To Reload:
     del sys.modules['gene2Key']
 
     import gene2Key
     g2k = gene2Key.g2k()
     g2k.initialize ( ma )
-    # g2k.importData ( 0, 10 )
-    g2k.startImport () 
+
+    rd = g2k.startImport ( 75 ) 
     
-   
+  
+
+ 

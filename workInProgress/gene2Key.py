@@ -7,6 +7,10 @@ import os,  sys, re
 import numpy as np
 import multiprocessing
 
+import pickle
+
+import pdb
+
 class g2k:
     def __init__ (self):
         self.testTop = os.environ['TESTTOP']
@@ -17,12 +21,12 @@ class g2k:
         self.byIndex = None
 
         self.dataFrame = None
-        self.sKey = None
-        self.dfColumns = None
+        self.giColumns = None
+        self.nGiColums = None
 
         # After data has been imported.
-        self.data = None
-
+        self.headers = None
+        self.genes = None
 
         
     # Create lookup tables where we can associate gene name, bacteria names
@@ -37,7 +41,15 @@ class g2k:
         fName = self.testTop + self.dbName
         lines = [ line.rstrip('\n').split('\t') for line in open( fName )]
         self.byGene  = { v[0]: (v[1],idx) for idx, v in enumerate(lines)}  
-        self.byBacteria  = { v[1]: (v[0],idx) for idx, v in enumerate(lines)}
+        #self.byBacteria  = { v[1]: (v[0],idx) for idx, v in enumerate(lines)}
+
+        pdb.set_trace()
+        bacteria = np.unique([l[1] for l in lines ])
+        self.byBacteria = dict().fromkeys(bacteria, [])
+        for idx, v in enumerate ( lines ):
+            self.byBacteria[v[1]].append ( (v[0],idx)) 
+
+        
         self.byIndex = {idx: (v[0], v[1]) for idx, v in enumerate(lines)}
 
         self.dataFrame = dataFrame
@@ -63,21 +75,13 @@ class g2k:
         if not self.initialized:
             raise ValueError ("Initialize failure, Data frame not set ")
         hdrData , geneData = ([],[] )
-        for  rowNumber in range ( start, end ):
+        for  rowNumber in range ( start, end+1 ):
             print "Processor %d Translating row %d " % (processNumber, rowNumber)  
             hdr, gene = self.makeCompactGeneArray( self.dataFrame.ix[rowNumber] )
             hdrData.append( hdr)
             geneData.append(gene)
         return_dict [ processNumber] = (hdrData, geneData)
-        # self.data = { 'header': hdrData, 'geneData': geneData }
-            
-
-
-    def testProcess ( self, start, end , processNumber, return_dict ) :
-        print ("In Test Process, Start %d , end %d " % (start,end))
-        return_dict[processNumber] = (start,end)
-
-
+ 
     # Start multithreading on gene data.
     # 
     def startImport ( self, nProcess = 10 , n=None ) :
@@ -87,10 +91,10 @@ class g2k:
         stride , start, end , pn , jobs  = (n // (nProcess-1), 0 , 0, -1 , [])
         manager = multiprocessing.Manager()
         rd = manager.dict()
+        start = time.time()
         while start < n  :
             pn += 1 
             end = start + stride if start+stride < n else n-1
-            # p = multiprocessing.Process(target= g2k.testProcess, args = ( self, start , end, pn, rd ) )
             p = multiprocessing.Process(target= g2k.importData, args = ( self, start , end, pn, rd ) )
             start = start+stride
             jobs.append(p)
@@ -103,10 +107,33 @@ class g2k:
         for k in rd.keys():
             hdr.extend(rd[k][0])
             gene.extend(rd[k][1])
-                        
-        return ( hdr, gene )
 
-    
+        # create data frame for header data.
+        self.headers = pd.DataFrame ( hdr, columns=self.nGiColumns)        
+        self.genes = gene
+        end = time.time()        
+        print "ImportData took %d seconds " % (end-start)
+               
+ 
+
+    # We don't want to save off the origional data. Just save the
+    # compression artifacts.
+    def save( self, fileName ):
+        self.dataFrame = None
+        self.initialized = False
+        start = time.time()
+        pickle.dump ( self, open ( fileName, 'wb'))
+        end = time.time()
+        print "Save took %d seconds" % (end-start)
+    # Factory function.
+    # Create an object. Load in the compression atrifacts.
+    @staticmethod
+    def load ( fileName ):
+        start=time.time()
+        self = pickle.load ( open ( fileName, 'rb'))
+        end = time.time ()
+        print "Load took %d seconds" % (end-start)
+        return self
 
 # Testing.
 
@@ -116,11 +143,17 @@ if False:
     del sys.modules['gene2Key']
 
     import gene2Key
-    g2k = gene2Key.g2k()
-    g2k.initialize ( ma )
 
-    rd = g2k.startImport ( 75 ) 
-    
-  
+    # Read data object.
+    if False:
+        g2k = gene2Key.g2k()
+        g2k.initialize ( ma )
+        g2k.startImport ( 35 )
 
- 
+    # Try to save class.
+    if False:
+        g2k.save ( g2k.testTop +'/compressedKeys.pkl')
+
+    # Reload class.
+    if False:
+        g2k = gene2Key.g2k.load(g2k.testTop +'/compressedKeys.pkl')

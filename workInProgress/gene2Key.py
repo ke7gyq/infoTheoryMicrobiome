@@ -4,12 +4,71 @@
 #
 
 import os,  sys, re
-import numpy as np
-import multiprocessing
-
-import pickle
-
+import numpy as np, pandas as pd
+import multiprocessing, pickle, time
 import pdb
+
+
+# Note that this was origionally in 'loadData'
+# Return a data frame where column name matches a query.
+#
+def queryMatch ( df, column , query ) :
+    try:
+        idxCol = df.columns==column
+        idxRow = (df.loc[:,idxCol].values == query).flatten()
+        return df.loc[idxRow, :]
+    except:
+        print ("Query of %s on %s failed" %( column, query))
+        return None
+
+# Allow user to pass in rules for query.
+def queryFilter ( df, column, rule ):
+    try:
+        idxCol= df.columns==column
+        values = pd.to_numeric( df.loc[:,idxCol].values.flatten() ,errors='coherce')
+        idxRow = np.array(map( rule, values ))
+        return df.loc[idxRow,:]
+    except:
+        print ("Query Lambda failed column:  %s " %( column))
+        return None
+
+# Return data frame queried by list of genes. 
+# Normally get the gene names by g2k.backteriaToGenes ( bacteria)
+def queryByGeneList ( df, geneList ):
+    idxRow = np.zeros ( df.shape[0] , dtype=bool)
+    for g in geneList:
+        selected = np.array(df.loc[:,g].values).astype('float') > 0.0
+        idxRow = [ a or  b for a,b in zip(idxRow, selected)]
+    return df.loc[idxRow,:]
+
+    
+
+
+
+# Read in pickle file. Give a time count for the amount of time needed.
+def readPickleFile ( fileName ) :
+    print "Starting reading file : %s" % fileName
+    start = time.time()
+    df =  pd.read_pickle( fileName )
+    end = time.time()
+    print "Completed read file : %s %d seconds " % (fileName,(end-start))
+    return df
+
+
+
+# Read in text file. 
+def readFile (fileName):
+    try:
+        print "Starting reading file : %s" % fileName
+        start = time.time()
+        df=pd.read_csv( fileName, sep='\t', header=1, engine='python', 
+                        na_values=['nd'], index_col=0).transpose()
+        end = time.time()
+        print "Completed readfile  : %s %d seconds " % (fileName,(end-start))
+        return df
+    except:
+        print "Could not read %s "% fileName
+        os.exit(-1)
 
 class g2k:
     def __init__ (self):
@@ -35,21 +94,24 @@ class g2k:
     # Attach a dataframe that contains genes to this object.
     # Initialize the data frame fields to iterate over to form values.
     #
+    # Create a list of genes that can be indexed via bacteria.
+    # 
     def initialize ( self , dataFrame ) :
         if self.initialized: return
         self.initialized = 1
         fName = self.testTop + self.dbName
         lines = [ line.rstrip('\n').split('\t') for line in open( fName )]
         self.byGene  = { v[0]: (v[1],idx) for idx, v in enumerate(lines)}  
-        #self.byBacteria  = { v[1]: (v[0],idx) for idx, v in enumerate(lines)}
 
-        pdb.set_trace()
         bacteria = np.unique([l[1] for l in lines ])
-        self.byBacteria = dict().fromkeys(bacteria, [])
+        self.byBacteria = dict()
+        for b in bacteria:
+            self.byBacteria[b] = list()
+
         for idx, v in enumerate ( lines ):
             self.byBacteria[v[1]].append ( (v[0],idx)) 
-
         
+       
         self.byIndex = {idx: (v[0], v[1]) for idx, v in enumerate(lines)}
 
         self.dataFrame = dataFrame
@@ -57,7 +119,26 @@ class g2k:
         self.giColumns  = [ c for c in dataFrame.columns if re.match(sKey,c) ]
         self.nGiColumns  = [ c for c in dataFrame.columns if not re.match(sKey,c)]
         
+    # Given a bacteria, find list of genes that correspond to the bacteria.
+    # Return 2 lists, first list is the gene name, second is the gene number.
+    #
+    def bacteriaToGenes(self, bacteria ):
+        gb = np.array(self.byBacteria[bacteria])
+        return (gb[:,0], gb[:,1].astype(int))
         
+    # given a gene number ( from bacteria to gene) return the bacteria and 
+    # gene name.
+    def getGeneFromGeneNumber( self, geneNumber):
+        g , b = self.byIndex [ geneNumber] 
+        return (g,b)
+        
+    # Return the bacteria that is accociated with this gene.
+    # Note that this returns both the bacteria and the gene number 
+    # associated with this bacteria.
+    def gene2bacteria(self, gene ):
+        return self.byGene[gene]
+
+
     # makeCompactGeneArray
     # Given a row into the data frame, copy over attribute information ( metadata )
     # and find the genes in the data.
@@ -135,7 +216,8 @@ class g2k:
         print "Load took %d seconds" % (end-start)
         return self
 
-# Testing.
+
+
 
 if False:
     # %pdb
@@ -157,3 +239,6 @@ if False:
     # Reload class.
     if False:
         g2k = gene2Key.g2k.load(g2k.testTop +'/compressedKeys.pkl')
+
+    # Run code snippet in debugger.
+    #pdb.run ('gene2Key.queryByGeneList(ma,geneList )')
